@@ -1,0 +1,53 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Number Submission</title>
+</head>
+<body>
+    <h1>Submit a Number</h1>
+    <form id="numberForm">
+        <input type="text" id="number" name="number">
+        <button type="button" onclick="submitNumber()">Submit</button>
+    </form>
+    <h2>History</h2>
+    <button type="button" onclick="fetchHistory()">Fetch History</button>
+    <table id="historyTable">
+        <thead>
+            <tr>
+                <th>Number</th>
+                <th>Date</th>
+            </tr>
+        </thead>
+        <tbody>
+        </tbody>
+    </table>
+    <script>
+        function submitNumber() {
+            const number = document.getElementById('number').value;
+            fetch('https://eefg5vinf0.execute-api.ap-south-1.amazonaws.com/test/submit', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ number: number })
+            }).then(response => response.json())
+              .then(data => alert(data.message));
+        }
+
+        function fetchHistory() {
+            fetch('https://eefg5vinf0.execute-api.ap-south-1.amazonaws.com/test/history')
+                .then(response => response.json())
+                .then(data => {
+                    const tableBody = document.getElementById('historyTable').getElementsByTagName('tbody')[0];
+                    tableBody.innerHTML = '';
+                    data.forEach(item => {
+                        const row = tableBody.insertRow();
+                        row.insertCell(0).innerText = item.number;
+                        row.insertCell(1).innerText = item.date;
+                    });
+                });
+        }
+    </script>
+</body>
+</html>
