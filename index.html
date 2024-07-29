@@ -1,146 +1,53 @@
-import pulumi
-from pulumi_aws import s3, iam, lambda_, apigateway
-import json
-import pulumi_aws
-
-# Clone the GitHub repository
-repo_url = 'https://github.com/SaurabhBadhel/demo-project/tree/main'
-clone_dir = '/tmp/demo-project'
-if not os.path.exists(clone_dir):
-    git.Repo.clone_from(repo_url, clone_dir)
-
-# Create an S3 bucket
-bucket = s3.Bucket('pulumi-static-website-bucket',
-    website=s3.BucketWebsiteArgs(
-        index_document='index.html'
-    )
-)
-
-# Upload files to the S3 bucket
-def upload_directory(directory_path, bucket):
-    for root, _, files in os.walk(directory_path):
-        for file in files:
-            file_path = os.path.join(root, file)
-            relative_path = os.path.relpath(file_path, directory_path)
-            content_type, _ = mimetypes.guess_type(file_path)
-            if content_type is None:
-                content_type = 'application/octet-stream'
-            s3.BucketObject(
-                relative_path,
-                bucket=bucket.bucket,
-                source=pulumi.FileAsset(file_path),
-                content_type=content_type
-            )
-
-
-upload_directory(clone_dir, bucket)
-
-# Export the website URL
-pulumi.export('website_url', pulumi.Output.concat('http://', bucket.website_endpoint))
-
-# DynamoDB table for storing numbers
-dynamodb_table = pulumi_aws.dynamodb.Table('numbersTable',
-    attributes=[{
-        'name': 'id',
-        'type': 'S',
-    }],
-    hash_key='id',
-    read_capacity=5,
-    write_capacity=5,
-)
-
-# IAM role for Lambda
-lambda_role = iam.Role('lambdaRole', assume_role_policy=json.dumps({
-    'Version': '2012-10-17',
-    'Statement': [{
-        'Action': 'sts:AssumeRole',
-        'Effect': 'Allow',
-        'Principal': {
-            'Service': 'lambda.amazonaws.com',
-        },
-    }],
-}))
-
-iam.RolePolicyAttachment('lambdaDynamoDBPolicy', role=lambda_role.name,
-    policy_arn='arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess')
-
-iam.RolePolicyAttachment('lambdaBasicExecution', role=lambda_role.name,
-    policy_arn='arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole')
-
-# Lambda function to save numbers
-save_number_lambda = lambda_.Function('saveNumberLambda',
-    runtime='python3.8',
-    role=lambda_role.arn,
-    handler='save_number.handler',
-    code=pulumi.asset.FileArchive('./lambda_function/save_number'),
-    environment=lambda_.FunctionEnvironmentArgs(
-        variables={
-            'TABLE_NAME': dynamodb_table.name,
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Number Submission</title>
+</head>
+<body>
+    <h1>Submit a Number</h1>
+    <form id="numberForm">
+        <input type="text" id="number" name="number">
+        <button type="button" onclick="submitNumber()">Submit</button>
+    </form>
+    <h2>History</h2>
+    <button type="button" onclick="fetchHistory()">Fetch History</button>
+    <table id="historyTable">
+        <thead>
+            <tr>
+                <th>Number</th>
+                <th>Date</th>
+            </tr>
+        </thead>
+        <tbody>
+        </tbody>
+    </table>
+    <script src="config.js"></script>
+    <script>
+        function submitNumber() {
+            const number = document.getElementById('number').value;
+            fetch(API_ENDPOINTS.SUBMIT, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ number: number })
+            }).then(response => response.json())
+              .then(data => alert(data.message));
         }
-    )
-)
 
-# Lambda function to fetch numbers
-fetch_history_lambda = lambda_.Function('fetchHistoryLambda',
-    runtime='python3.8',
-    role=lambda_role.arn,
-    handler='fetch_history.handler',
-    code=pulumi.asset.FileArchive('./lambda_function/fetch_history'),
-    environment=lambda_.FunctionEnvironmentArgs(
-        variables={
-            'TABLE_NAME': dynamodb_table.name,
+        function fetchHistory() {
+            fetch(API_ENDPOINTS.HISTORY)
+                .then(response => response.json())
+                .then(data => {
+                    const tableBody = document.getElementById('historyTable').getElementsByTagName('tbody')[0];
+                    tableBody.innerHTML = '';
+                    data.forEach(item => {
+                        const row = tableBody.insertRow();
+                        row.insertCell(0).innerText = item.number;
+                        row.insertCell(1).innerText = item.date;
+                    });
+                });
         }
-    )
-)
-
-# API Gateway
-api = apigateway.RestApi('numbersApi',
-    description='API for number submission and history retrieval'
-)
-
-submit_resource = apigateway.Resource('submitResource',
-    parent_id=api.root_resource_id,
-    path_part='submit',
-    rest_api=api.id
-)
-
-submit_method = apigateway.Method('submitMethod',
-    authorization='NONE',
-    http_method='POST',
-    resource_id=submit_resource.id,
-    rest_api=api.id,
-)
-
-submit_integration = apigateway.Integration('submitIntegration',
-    rest_api=api.id,
-    resource_id=submit_resource.id,
-    http_method=submit_method.http_method,
-    integration_http_method='POST',
-    type='AWS_PROXY',
-    uri=save_number_lambda.invoke_arn
-)
-
-history_resource = apigateway.Resource('historyResource',
-    parent_id=api.root_resource_id,
-    path_part='history',
-    rest_api=api.id
-)
-
-history_method = apigateway.Method('historyMethod',
-    authorization='NONE',
-    http_method='GET',
-    resource_id=history_resource.id,
-    rest_api=api.id,
-)
-
-history_integration = apigateway.Integration('historyIntegration',
-    rest_api=api.id,
-    resource_id=history_resource.id,
-    http_method=history_method.http_method,
-    integration_http_method='POST',
-    type='AWS_PROXY',
-    uri=fetch_history_lambda.invoke_arn
-)
-
-pulumi.export('bucket_url', bucket.website_endpoint)
-pulumi.export('api_url', api.execution_arn.apply(lambda arn: arn.split('/')[0]))
+    </script>
+</body>
+</html>
